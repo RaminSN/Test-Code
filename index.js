@@ -68,7 +68,7 @@ const isValidLogFile = (monthName) => (filename) =>
   filename.includes(`ALLT_${monthName}`);
 
 const readFile = (dirPath) => (filename) =>
-  fs.readFileSync(path.join(dirPath, filename), 'utf8');
+  fs.readFileSync(path.join(dirPath, filename), 'latin1');
 
 const readErrorFiles = (dirPath, monthName) =>
   R.pipe(
@@ -82,7 +82,7 @@ const splitByEntry = (text) =>
 
 const isNVVJsonEntry = (text) =>
   text.includes('Info') &&
-  text.includes('rdsverket - Bot') &&
+  text.includes('Naturvårdsverket - Bot') &&
   text.includes('{');
 
 const parseLogEntry = (text) => {
@@ -110,10 +110,11 @@ if (!fs.statSync(inputDir).isDirectory()) {
   exit();
 }
 
-const months = fs.readFileSync(monthsFile, 'utf8');
+const months = JSON.parse(fs.readFileSync(monthsFile, 'utf8'));
 
+console.log('Resetting output folder.\n');
+fs.rmSync(outputDir, { recursive: true, force: true });
 fs.mkdirSync(outputDir, { recursive: true });
-console.log('Created output folder.\n');
 
 for (let month of months) {
   console.log(`Processing logs for ${month}...`);
@@ -130,7 +131,11 @@ for (let month of months) {
     outputDir,
     `duplicated-nvv-reports_${month}.json`,
   );
-  fs.writeFileSync(outputPath, JSON.stringify(nvvReportsByTypeAndHash), 'utf8');
+  fs.writeFileSync(
+    outputPath,
+    JSON.stringify(nvvReportsByTypeAndHash, null, 2),
+    'utf8',
+  );
   console.log(`Saved file: ${outputPath}\n`);
 }
 console.log('Finished.');
