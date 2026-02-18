@@ -88,7 +88,7 @@ const parseJSON = (text) => {
   const t5ServerTimestamp = match[1];
   const jsonStart = text.indexOf('{');
   const parsedJson = JSON.parse(text.slice(jsonStart));
-  const hash = `report_${simpleHash(stableHash(parsedJson))}`;
+  const hash = `report_${simpleHash(stableHash(R.omit(['Tidpunkt'], parsedJson)))}`;
 
   return { t5ServerTimestamp, hash, ...parsedJson };
 };
