@@ -92,13 +92,18 @@ const getFileContents = (dirPath, monthName) =>
     R.map(readFile(dirPath)),
   )(dirPath);
 
-const splitByEntry = (text) =>
+const getEntries = (text) =>
   text.split(new RegExp(`(?=${t5ServerTimestampRegex.source})`, 'm'));
 
 const isNVVJsonEntry = (text) =>
   text.includes('Info') &&
   text.includes('Naturvårdsverket - Bot') &&
   text.includes('{');
+
+const isNVVErrorResponse = (text) =>
+  text.includes('Info') &&
+  text.includes('Naturvårdsverket - Bot') &&
+  text.includes('valideringsfel');
 
 const parseLogEntry = (text) => {
   const match = text.match(t5ServerTimestampRegex);
@@ -158,16 +163,29 @@ const isPayloadRelatedTo = (orgnr) => (payload) =>
     payload,
   );
 
-const getReportsForOrgnr = (orgnr) =>
+const getReportsForOrgnr = (orgNumber) =>
   R.pipe(
     getFlatReports,
-    R.filter(R.pipe(R.prop(['payload']), isPayloadRelatedTo(orgnr))),
+    R.filter(R.pipe(R.prop(['payload']), isPayloadRelatedTo(orgNumber))),
   );
 
 for (let month of months) {
   console.log(`Processing logs for ${month}...`);
   const nvvReportsByTypeAndHash = R.pipe(
-    R.chain(R.pipe(splitByEntry, R.filter(isNVVJsonEntry))),
+    R.chain(
+      R.pipe(
+        getEntries,
+        R.filter(R.anyPass([isNVVJsonEntry, isNVVErrorResponse])),
+        R.aperture(2),
+        R.filter(
+          R.allPass([
+            R.pipe(R.head, R.complement(isNVVErrorResponse)),
+            R.pipe(R.last, isNVVJsonEntry),
+          ]),
+        ),
+        R.map(R.last),
+      ),
+    ),
     R.map(parseLogEntry),
     R.groupBy(shallowStructureKey),
     R.map(R.groupBy(R.prop('hash'))),
@@ -194,19 +212,13 @@ for (let month of months) {
   console.log('Creating org files...\n');
 
   for (let orgNumber of orgNumbers) {
+    let reports = getReportsForOrgnr(orgNumber)(nvvReportsByTypeAndHash);
+    if (reports.length == 0) continue;
     let specificOrgDir = path.join(orgDir, orgNumber);
     const orgPath = path.join(specificOrgDir, `${month}.json`);
 
     fs.mkdirSync(specificOrgDir, { recursive: true });
-    fs.writeFileSync(
-      orgPath,
-      JSON.stringify(
-        getReportsForOrgnr(orgNumber)(nvvReportsByTypeAndHash),
-        null,
-        2,
-      ),
-      'utf-8',
-    );
+    fs.writeFileSync(orgPath, JSON.stringify(reports, null, 2), 'utf-8');
   }
 }
 console.log('Finished.');
