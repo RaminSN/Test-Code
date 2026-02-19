@@ -13,9 +13,20 @@ const outputDir = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   'output',
 );
+
 const monthsFile = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   'months.json',
+);
+
+const orgNumbersFile = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'org-numbers.json',
+);
+
+const orgDir = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  `org_files`,
 );
 
 const t5ServerTimestampRegex = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3})/;
@@ -47,7 +58,7 @@ const simpleHash = (str) => crypto.createHash('md5').update(str).digest('hex');
 // consolidate instead of including the same payload multiple times
 const collapseGroup = (group) => {
   const t5ServerTimestamps = R.map(R.prop('t5ServerTimestamp'))(group);
-  const { t5ServerTimestamp, hash, ...rest } = group[0];
+  const { t5ServerTimestamp, ...rest } = group[0];
   return {
     payload: rest,
     count: group.length,
@@ -62,6 +73,10 @@ const filterHashGroups = (hashGroupObj) =>
       .map(([hash, group]) => [hash, collapseGroup(group)])
       .filter(([_, collapsed]) => collapsed && collapsed.count >= 2),
   );
+
+// checks if an object has a certain value in any of the provided props
+const hasAnyPropWithValue = (props, value, obj) =>
+  R.any(R.pipe(R.flip(R.prop)(obj), R.equals(value)), props);
 //#endregion
 
 const isValidLogFile = (monthName) => (filename) =>
@@ -70,7 +85,7 @@ const isValidLogFile = (monthName) => (filename) =>
 const readFile = (dirPath) => (filename) =>
   fs.readFileSync(path.join(dirPath, filename), 'latin1');
 
-const readErrorFiles = (dirPath, monthName) =>
+const getFileContents = (dirPath, monthName) =>
   R.pipe(
     fs.readdirSync,
     R.filter(isValidLogFile(monthName)),
@@ -100,6 +115,11 @@ if (!fs.existsSync(monthsFile)) {
   exit();
 }
 
+if (!fs.existsSync(orgNumbersFile)) {
+  console.error(`org-numbers.json does not exist: ${orgNumbersFile}`);
+  exit();
+}
+
 if (!fs.existsSync(inputDir)) {
   console.error(`Input directory does not exist: ${inputDir}`);
   exit();
@@ -111,31 +131,82 @@ if (!fs.statSync(inputDir).isDirectory()) {
 }
 
 const months = JSON.parse(fs.readFileSync(monthsFile, 'utf8'));
+const orgNumbers = JSON.parse(fs.readFileSync(orgNumbersFile, 'utf8'));
 
 console.log('Resetting output folder.\n');
 fs.rmSync(outputDir, { recursive: true, force: true });
 fs.mkdirSync(outputDir, { recursive: true });
 
+console.log('Resetting org folder.\n');
+fs.rmSync(orgDir, { recursive: true, force: true });
+fs.mkdirSync(orgDir, { recursive: true });
+
+const getFlatReports = R.pipe(Object.values, R.chain(Object.values));
+
+const getHighestCount = R.pipe(
+  getFlatReports,
+  R.sortBy(R.prop(['count'])),
+  R.findLast(R.identity),
+);
+
+const getCountSum = R.pipe(getFlatReports, R.map(R.prop(['count'])), R.sum);
+
+const isPayloadRelatedTo = (orgnr) => (payload) =>
+  hasAnyPropWithValue(
+    ['Ombud', 'VerksamhetsUtovare', 'TidigareInnehavare', 'Transportor'],
+    orgnr,
+    payload,
+  );
+
+const getReportsForOrgnr = (orgnr) =>
+  R.pipe(
+    getFlatReports,
+    R.filter(R.pipe(R.prop(['payload']), isPayloadRelatedTo(orgnr))),
+  );
+
 for (let month of months) {
   console.log(`Processing logs for ${month}...`);
   const nvvReportsByTypeAndHash = R.pipe(
-    R.map(R.pipe(splitByEntry, R.filter(isNVVJsonEntry))),
-    R.flatten,
+    R.chain(R.pipe(splitByEntry, R.filter(isNVVJsonEntry))),
     R.map(parseLogEntry),
     R.groupBy(shallowStructureKey),
     R.map(R.groupBy(R.prop('hash'))),
     R.map(filterHashGroups),
-  )(readErrorFiles(inputDir, month));
+  )(getFileContents(inputDir, month));
 
   const outputPath = path.join(
     outputDir,
     `duplicated-nvv-reports_${month}.json`,
   );
+
   fs.writeFileSync(
     outputPath,
     JSON.stringify(nvvReportsByTypeAndHash, null, 2),
     'utf8',
   );
-  console.log(`Saved file: ${outputPath}\n`);
+
+  console.log(
+    `Highest count: ${getHighestCount(nvvReportsByTypeAndHash).count}`,
+  );
+
+  console.log(`Total count: ${getCountSum(nvvReportsByTypeAndHash)}`);
+
+  console.log('Creating org files...\n');
+
+  for (let orgNumber of orgNumbers) {
+    let specificOrgDir = path.join(orgDir, orgNumber);
+    const orgPath = path.join(specificOrgDir, `${month}.json`);
+
+    fs.mkdirSync(specificOrgDir, { recursive: true });
+    fs.writeFileSync(
+      orgPath,
+      JSON.stringify(
+        getReportsForOrgnr(orgNumber)(nvvReportsByTypeAndHash),
+        null,
+        2,
+      ),
+      'utf-8',
+    );
+  }
 }
 console.log('Finished.');
