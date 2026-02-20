@@ -133,15 +133,16 @@ if (!fs.statSync(inputDir).isDirectory()) {
 const months = JSON.parse(fs.readFileSync(monthsFile, 'utf8'));
 const orgNumbers = JSON.parse(fs.readFileSync(orgNumbersFile, 'utf8'));
 
-const getFlatReports = R.pipe(Object.values, R.chain(Object.values));
+const getFlatReports = R.pipe(R.values, R.chain(R.values));
 
 const getHighestCount = R.pipe(
   getFlatReports,
-  R.sortBy(R.prop(['count'])),
-  R.findLast(R.identity),
+  R.sortBy(R.prop('count')),
+  R.last,
+  R.prop('count'),
 );
 
-const getCountSum = R.pipe(getFlatReports, R.map(R.prop(['count'])), R.sum);
+const getTotalCount = R.pipe(getFlatReports, R.pluck('count'), R.sum);
 
 const isPayloadRelatedTo = (orgnr) => (payload) =>
   hasAnyPropWithValue(
@@ -191,8 +192,8 @@ const groupedReports = R.pipe(
   R.map(R.pipe(R.groupBy(R.prop('hash')), filterDuplicatedReports)),
 )(months);
 
-console.log(`Highest count: ${getHighestCount(groupedReports).count}`);
-console.log(`Total count: ${getCountSum(groupedReports)}`);
+console.log(`Highest count: ${getHighestCount(groupedReports)}`);
+console.log(`Total count: ${getTotalCount(groupedReports)}`);
 
 const outputPath = path.join(outputDir, `duplicated-nvv-reports.json`);
 
