@@ -24,10 +24,7 @@ const orgNumbersFile = path.join(
   'org-numbers.json',
 );
 
-const orgDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  `org_files`,
-);
+const orgDir = path.join(outputDir, `org_files`);
 
 const t5ServerTimestampRegex = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3})/;
 
@@ -213,4 +210,4 @@ for (let orgNumber of orgNumbers) {
   fs.writeFileSync(orgPath, JSON.stringify(reports, null, 2), 'utf-8');
 }
 
-console.log(`\nFinished!`);
+console.log(`Finished!`);
