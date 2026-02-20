@@ -63,13 +63,12 @@ const collapseGroup = (group) => {
   };
 };
 
-// filter hash groups where count >= 2
-const filterDuplicatedReports = (hashGroupObj) =>
-  Object.fromEntries(
-    Object.entries(hashGroupObj)
-      .map(([hash, group]) => [hash, collapseGroup(group)])
-      .filter(([_, collapsed]) => collapsed && collapsed.count >= 2),
-  );
+const filterDuplicatedReports = R.pipe(
+  R.toPairs,
+  R.map(R.adjust(1, collapseGroup)),
+  R.filter(R.pipe(R.last, R.prop('count'), R.gte(R.__, 2))),
+  R.fromPairs,
+);
 
 // checks if an object has a certain value in any of the provided props
 const hasAnyPropWithValue = (props, value, obj) =>
@@ -154,11 +153,11 @@ const isPayloadRelatedTo = (orgnr) => (payload) =>
 const getReportsForOrgnr = (orgNumber) =>
   R.pipe(
     getFlatReports,
-    R.filter(R.pipe(R.prop(['payload']), isPayloadRelatedTo(orgNumber))),
+    R.filter(R.propSatisfies(isPayloadRelatedTo(orgNumber), 'payload')),
   );
 
 const filterSuccessfulRequests = R.pipe(
-  R.filter(R.anyPass([isRequest, isErrorResponse])),
+  R.filter(R.either(isRequest, isErrorResponse)),
   R.aperture(2),
   R.filter(
     R.allPass([
@@ -166,7 +165,7 @@ const filterSuccessfulRequests = R.pipe(
       R.pipe(R.last, isRequest),
     ]),
   ),
-  R.map(R.last),
+  R.pluck(1),
 );
 
 console.log('Resetting output folder.');
@@ -182,9 +181,11 @@ console.log();
 const groupedReports = R.pipe(
   R.tap(() => console.log('Step 1/5: Reading files.')),
   R.chain(getFileContents(inputDir)),
+
   R.tap(() => console.log('Step 2/5: Parsing logs.')),
   R.chain(R.pipe(getLogEntries, filterSuccessfulRequests)),
   R.map(parseLogEntry),
+
   R.tap(() => console.log('Step 3/5: Consolidating reports.')),
   R.groupBy(hashReportType),
   R.map(R.pipe(R.groupBy(R.prop('hash')), filterDuplicatedReports)),
