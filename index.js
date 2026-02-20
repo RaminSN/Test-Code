@@ -32,7 +32,7 @@ const orgDir = path.join(
 const t5ServerTimestampRegex = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}:\d{3})/;
 
 //#region Helpers
-const shallowStructureKey = (report) =>
+const hashReportType = (report) =>
   `reportType_${simpleHash(JSON.stringify(Object.keys(report).sort())).substring(0, 8)}`;
 
 // Converts an object to a string regardless of internal entry order. Can be safely used as a fingerprint whereas JSON.stringify can't.
@@ -85,25 +85,25 @@ const isValidLogFile = (monthName) => (filename) =>
 const readFile = (dirPath) => (filename) =>
   fs.readFileSync(path.join(dirPath, filename), 'latin1');
 
-const getFileContents = (dirPath, monthName) =>
+const getFileContents = (dirPath) => (monthName) =>
   R.pipe(
     fs.readdirSync,
     R.filter(isValidLogFile(monthName)),
     R.map(readFile(dirPath)),
   )(dirPath);
 
-const getEntries = (text) =>
+const getLogEntries = (text) =>
   text.split(new RegExp(`(?=${t5ServerTimestampRegex.source})`, 'm'));
 
-const isNVVJsonEntry = (text) =>
+const isRequest = (text) =>
   text.includes('Info') &&
   text.includes('Naturvårdsverket - Bot') &&
   text.includes('{');
 
-const isNVVErrorResponse = (text) =>
+const isErrorResponse = (text) =>
   text.includes('Info') &&
   text.includes('Naturvårdsverket - Bot') &&
-  text.includes('valideringsfel');
+  text.includes('TraceId');
 
 const parseLogEntry = (text) => {
   const match = text.match(t5ServerTimestampRegex);
@@ -111,7 +111,6 @@ const parseLogEntry = (text) => {
   const jsonStart = text.indexOf('{');
   const parsedJson = JSON.parse(text.slice(jsonStart));
   const hash = `report_${simpleHash(stableStringify(R.omit(['Tidpunkt'], parsedJson)))}`;
-
   return { t5ServerTimestamp, hash, ...parsedJson };
 };
 
@@ -138,14 +137,6 @@ if (!fs.statSync(inputDir).isDirectory()) {
 const months = JSON.parse(fs.readFileSync(monthsFile, 'utf8'));
 const orgNumbers = JSON.parse(fs.readFileSync(orgNumbersFile, 'utf8'));
 
-console.log('Resetting output folder.\n');
-fs.rmSync(outputDir, { recursive: true, force: true });
-fs.mkdirSync(outputDir, { recursive: true });
-
-console.log('Resetting org folder.\n');
-fs.rmSync(orgDir, { recursive: true, force: true });
-fs.mkdirSync(orgDir, { recursive: true });
-
 const getFlatReports = R.pipe(Object.values, R.chain(Object.values));
 
 const getHighestCount = R.pipe(
@@ -169,56 +160,58 @@ const getReportsForOrgnr = (orgNumber) =>
     R.filter(R.pipe(R.prop(['payload']), isPayloadRelatedTo(orgNumber))),
   );
 
-for (let month of months) {
-  console.log(`Processing logs for ${month}...`);
-  const nvvReportsByTypeAndHash = R.pipe(
-    R.chain(
-      R.pipe(
-        getEntries,
-        R.filter(R.anyPass([isNVVJsonEntry, isNVVErrorResponse])),
-        R.aperture(2),
-        R.filter(
-          R.allPass([
-            R.pipe(R.head, R.complement(isNVVErrorResponse)),
-            R.pipe(R.last, isNVVJsonEntry),
-          ]),
-        ),
-        R.map(R.last),
-      ),
-    ),
-    R.map(parseLogEntry),
-    R.groupBy(shallowStructureKey),
-    R.map(R.groupBy(R.prop('hash'))),
-    R.map(filterHashGroups),
-  )(getFileContents(inputDir, month));
+const filterSuccessfulRequests = R.pipe(
+  R.filter(R.anyPass([isRequest, isErrorResponse])),
+  R.aperture(2),
+  R.filter(
+    R.allPass([
+      R.pipe(R.head, R.complement(isErrorResponse)),
+      R.pipe(R.last, isRequest),
+    ]),
+  ),
+  R.map(R.last),
+);
 
-  const outputPath = path.join(
-    outputDir,
-    `duplicated-nvv-reports_${month}.json`,
-  );
+console.log('Resetting output folder.');
+fs.rmSync(outputDir, { recursive: true, force: true });
+fs.mkdirSync(outputDir, { recursive: true });
 
-  fs.writeFileSync(
-    outputPath,
-    JSON.stringify(nvvReportsByTypeAndHash, null, 2),
-    'utf8',
-  );
+console.log('Resetting org folder.');
+fs.rmSync(orgDir, { recursive: true, force: true });
+fs.mkdirSync(orgDir, { recursive: true });
 
-  console.log(
-    `Highest count: ${getHighestCount(nvvReportsByTypeAndHash).count}`,
-  );
+console.log();
 
-  console.log(`Total count: ${getCountSum(nvvReportsByTypeAndHash)}`);
+const groupedReports = R.pipe(
+  R.tap(() => console.log('Step 1/5: Reading files...')),
+  R.chain(R.pipe(getFileContents(inputDir))),
+  R.tap(() => console.log('Step 2/5: Parsing logs...')),
+  R.chain(R.pipe(getLogEntries, filterSuccessfulRequests)),
+  R.map(parseLogEntry),
+  R.tap(() => console.log('Step 3/5: Consolidating reports...')),
+  R.groupBy(hashReportType),
+  R.map(R.groupBy(R.prop('hash'))),
+  R.map(filterHashGroups),
+)(months);
 
-  console.log('Creating org files...\n');
+console.log(`Highest count: ${getHighestCount(groupedReports).count}`);
+console.log(`Total count: ${getCountSum(groupedReports)}`);
 
-  for (let orgNumber of orgNumbers) {
-    let reports = getReportsForOrgnr(orgNumber)(nvvReportsByTypeAndHash);
-    if (reports.length == 0) continue;
-    let specificOrgDir = path.join(orgDir, orgNumber);
-    const orgPath = path.join(specificOrgDir, `${month}.json`);
+const outputPath = path.join(outputDir, `duplicated-nvv-reports.json`);
 
-    fs.mkdirSync(specificOrgDir, { recursive: true });
-    fs.writeFileSync(orgPath, JSON.stringify(reports, null, 2), 'utf-8');
-  }
+console.log(`Step 4/5: Creating file ${outputPath}...`);
+fs.writeFileSync(outputPath, JSON.stringify(groupedReports, null, 2), 'utf8');
+
+console.log(`Step 5/5: Creating org files...`);
+
+for (let orgNumber of orgNumbers) {
+  let reports = getReportsForOrgnr(orgNumber)(groupedReports);
+  if (reports.length == 0) continue;
+  let specificOrgDir = path.join(orgDir, orgNumber);
+  const orgPath = path.join(specificOrgDir, `duplicated-nvv-reports.json`);
+
+  fs.mkdirSync(specificOrgDir, { recursive: true });
+  fs.writeFileSync(orgPath, JSON.stringify(reports, null, 2), 'utf-8');
 }
-console.log('Finished.');
+
+console.log(`\nFinished!`);
