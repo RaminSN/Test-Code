@@ -67,7 +67,7 @@ const collapseGroup = (group) => {
 };
 
 // filter hash groups where count >= 2
-const filterHashGroups = (hashGroupObj) =>
+const filterDuplicatedReports = (hashGroupObj) =>
   Object.fromEntries(
     Object.entries(hashGroupObj)
       .map(([hash, group]) => [hash, collapseGroup(group)])
@@ -183,15 +183,14 @@ fs.mkdirSync(orgDir, { recursive: true });
 console.log();
 
 const groupedReports = R.pipe(
-  R.tap(() => console.log('Step 1/5: Reading files...')),
-  R.chain(R.pipe(getFileContents(inputDir))),
-  R.tap(() => console.log('Step 2/5: Parsing logs...')),
+  R.tap(() => console.log('Step 1/5: Reading files.')),
+  R.chain(getFileContents(inputDir)),
+  R.tap(() => console.log('Step 2/5: Parsing logs.')),
   R.chain(R.pipe(getLogEntries, filterSuccessfulRequests)),
   R.map(parseLogEntry),
-  R.tap(() => console.log('Step 3/5: Consolidating reports...')),
+  R.tap(() => console.log('Step 3/5: Consolidating reports.')),
   R.groupBy(hashReportType),
-  R.map(R.groupBy(R.prop('hash'))),
-  R.map(filterHashGroups),
+  R.map(R.pipe(R.groupBy(R.prop('hash')), filterDuplicatedReports)),
 )(months);
 
 console.log(`Highest count: ${getHighestCount(groupedReports).count}`);
@@ -199,10 +198,10 @@ console.log(`Total count: ${getCountSum(groupedReports)}`);
 
 const outputPath = path.join(outputDir, `duplicated-nvv-reports.json`);
 
-console.log(`Step 4/5: Creating file ${outputPath}...`);
+console.log(`Step 4/5: Creating file ${outputPath}.`);
 fs.writeFileSync(outputPath, JSON.stringify(groupedReports, null, 2), 'utf8');
 
-console.log(`Step 5/5: Creating org files...`);
+console.log(`Step 5/5: Creating org files.`);
 
 for (let orgNumber of orgNumbers) {
   let reports = getReportsForOrgnr(orgNumber)(groupedReports);
