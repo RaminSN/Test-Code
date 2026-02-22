@@ -5,24 +5,13 @@ import * as R from 'ramda';
 import crypto from 'crypto';
 import { exit } from 'process';
 
-const inputDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  'input',
-);
-const outputDir = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  'output',
-);
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const inputDir = path.join(currentDir, 'input');
+const outputDir = path.join(currentDir, 'output');
 
-const monthsFile = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  'months.json',
-);
+const monthsFile = path.join(currentDir, 'months.json');
 
-const orgNumbersFile = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  'org-numbers.json',
-);
+const orgNumbersFile = path.join(currentDir, 'org-numbers.json');
 
 const orgDir = path.join(outputDir, `org_files`);
 
@@ -157,7 +146,7 @@ const getReportsForOrgnr = (orgNumber) =>
     R.filter(R.propSatisfies(isPayloadRelatedTo(orgNumber), 'payload')),
   );
 
-const filterSuccessfulRequests = R.pipe(
+const extractSuccessfulRequests = R.pipe(
   R.filter(R.either(isRequest, isErrorResponse)),
   R.aperture(2),
   R.filter(
@@ -184,7 +173,7 @@ const groupedReports = R.pipe(
   R.chain(getFileContents(inputDir)),
 
   R.tap(() => console.log('Step 2/5: Parsing logs.')),
-  R.chain(R.pipe(getLogEntries, filterSuccessfulRequests)),
+  R.chain(R.pipe(getLogEntries, extractSuccessfulRequests)),
   R.map(parseLogEntry),
 
   R.tap(() => console.log('Step 3/5: Consolidating reports.')),
@@ -209,7 +198,7 @@ for (let orgNumber of orgNumbers) {
   const orgPath = path.join(specificOrgDir, `duplicated-nvv-reports.json`);
 
   fs.mkdirSync(specificOrgDir, { recursive: true });
-  fs.writeFileSync(orgPath, JSON.stringify(reports, null, 2), 'utf-8');
+  fs.writeFileSync(orgPath, JSON.stringify(reports, null, 2), 'utf8');
 }
 
 console.log(`Finished!`);
