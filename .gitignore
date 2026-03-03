@@ -2,3 +2,6 @@ input
 output
 org_files
 node_modules
+
+# Emacs backup files
+*#
