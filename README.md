@@ -1,5 +1,7 @@
 # Instruktioner
 
+## Generera JSON-filen med duplicerade rapporter.
+
 1. Skapa mappen `input/`.
 1. Kopiera loggfilerna från T5-Server till input-mappen.
 1. Modifiera `months.json` för att styra vilka loggfiler som ska läsas in.
@@ -7,3 +9,9 @@
 1. Kör `npm install`
 1. Kör `node index.js`
 1. Se resultat i mappen `output/`.
+
+## Clojure
+
+1. Lägg till `nvv-data.csv` i huvudmappen.
+1. Installera Babashka.
+1. Kör `bb nvv.clj`.
