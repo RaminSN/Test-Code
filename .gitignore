@@ -2,6 +2,8 @@ input
 output
 org_files
 node_modules
+nvv-data.csv
 
 # Emacs backup files
 *#
+*~
