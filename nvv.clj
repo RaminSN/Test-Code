@@ -110,9 +110,24 @@
                  (ZoneOffset/of "+02:00")))))
 
 (defn group
-  "Utility för sub-mappningar för plats och kontakt som är repetitivt i anteckningarna."
+  "Utility för sub-mappningar. Används för plats och kontakt som är repetitivt i anteckningarna."
   ([mapping] {::group mapping})
   ([key mapping] {::group mapping ::key key}))
+
+(defn normalize
+  "Transformerar anteckning enligt angiven mappning. Syftet är att översätta de olika
+  anteckningarna till en gemensam struktur."
+  [mapping report]
+  (reduce-kv (fn [m k v]
+               (assoc m k (cond
+                            (::group v) (normalize (::group v)
+                                                   (if (::key v)
+                                                     (get report (::key v))
+                                                     report))
+                            (vector? v) (get-in report v)
+                            :else       (get report v))))
+             {}
+             mapping))
 
 (defn contact-mapping [epost-key namn-key tel-key]
   (group {:epost epost-key
@@ -186,20 +201,15 @@
    :verksamhet/namn         :VerksamhetensNamn
    :verksamhet/utovare      :Verksamhetsutovare})
 
-(defn normalize [mapping report]
-  (reduce-kv (fn [m k v]
-               (assoc m k (cond
-                            (::group v) (normalize (::group v)
-                                                   (if (::key v)
-                                                     (get report (::key v))
-                                                     report))
-                            (vector? v) (get-in report v)
-                            :else       (get report v))))
-             {}
-             mapping))
+(def processed-t5-reports
+  (->>
+   t5-reports
+   (map :payload)
+   (map (partial normalize t5-mapping))
+   (map #(update % :tidpunkt parse-time))))
 
-(def normalize-t5 (partial normalize t5-mapping))
-(def normalize-nvv (partial normalize nvv-mapping))
+(def normalized-nvv-reports
+  (map (partial normalize nvv-mapping) t5-reports))
 
 ;; ----------------------------------------------------------------------------------------------
 ;;
@@ -228,10 +238,7 @@
 ;; inte vid körning av programmet. Ignorera.
 (comment 
   (->
-   (first t5-reports)
-   :payload
-   normalize-t5
-   (update :tidpunkt parse-time)
+   (first processed-t5-reports)
    (#(into (sorted-map) %))
    pprint)
 
