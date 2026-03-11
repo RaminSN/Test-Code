@@ -81,7 +81,7 @@
   Transformerar anteckningarna från NVVs CSV-fil till något mer 'vänligt'
   genom att konvertera rubrikerna samt bearbeta platserna till en struktur
   som liknar den riktiga payload-strukturen."
-  (let [headers (map keyword (first nvv-data))]
+  (let [headers (map #(keyword (str/replace % "\uFEFF" "")) (first nvv-data))]
     (into [] (comp
               (drop 1)
               (map #(zipmap headers %))
@@ -92,22 +92,20 @@
 ;; Main
 ;; ---------------
 
-(defn parse-time
-  "Läser in tidpunkterna från de två olika formaten till
-  en gemensam java.time.Instant.
+(defn parse-time [t]
+    (when t
+      (cond
+        (str/includes? t "+")
+        (.toInstant (OffsetDateTime/parse t))
 
-  Tidpunkterna från NVV har följande format:
-      yyyy-MM-dd HH:mm:ss.SSSSSSS.
+        (str/includes? t "T")
+        (.toInstant (.atOffset (LocalDateTime/parse t) (ZoneOffset/of "+02:00")))
 
-  Tidpunkterna från T5 Server-loggarna har följande format: 
-      yyyy-MM-ddTHH:mm:ss.SSSSSSS+02:00"
-  [t]
-  (if (str/includes? t "T")
-    (.toInstant (OffsetDateTime/parse t))
-    (.toInstant (.atOffset
-                 (LocalDateTime/parse t (DateTimeFormatter/ofPattern
-                                         "yyyy-MM-dd HH:mm:ss.SSSSSSS"))
-                 (ZoneOffset/of "+02:00")))))
+        :else
+        (.toInstant (.atOffset
+                     (LocalDateTime/parse t (DateTimeFormatter/ofPattern
+                                             "yyyy-MM-dd HH:mm:ss.SSSSSSS"))
+                     (ZoneOffset/of "+02:00"))))))
 
 (defn group
   "Utility för sub-mappningar. Används för plats och kontakt som är repetitivt i anteckningarna."
@@ -116,18 +114,34 @@
 
 (defn normalize
   "Transformerar anteckning enligt angiven mappning. Syftet är att översätta de olika
-  anteckningarna till en gemensam struktur."
+  anteckningarna till en gemensam struktur. Komplicerad funktion då den är baserad på
+  logik enligt ovanstående group-utility."
   [mapping report]
   (reduce-kv (fn [m k v]
-               (assoc m k (cond
-                            (::group v) (normalize (::group v)
-                                                   (if (::key v)
-                                                     (get report (::key v))
-                                                     report))
-                            (vector? v) (get-in report v)
-                            :else       (get report v))))
+               (if (nil? v)
+                 m
+                 (assoc m k (cond
+                              (::group v) (normalize (::group v)
+                                                     (if (::key v)
+                                                       (get report (::key v))
+                                                       report))
+                              (vector? v) (get-in report v)
+                              :else       (get report v)))))
              {}
              mapping))
+
+(defn normalize-values
+  "Normaliserar heterogena värden."
+  [report]
+  (->
+   report
+   (update :tidpunkt parse-time)
+   (update :mottagningsdatum parse-time)
+   (update :avfall/mangd #(if (string? %)
+                            (parse-double %)
+                            (double %)))
+   (update :cfarnr {"NULL"   nil
+                    "SAKNAS" nil})))
 
 (defn contact-mapping [epost-key namn-key tel-key]
   (group {:epost epost-key
@@ -145,9 +159,10 @@
   {
    :avfall/kod               [:Avfall :Kod]
    :avfall/mangd             [:Avfall :Mangd]
+   :avfallId                 nil ;; Denna ska vara nil
    :behandlingsplats         (t5-location-mapping :BehandlingsPlats)
    :cfarnr                   :CfarNR
-   :kommande-hanteringsplats (t5-location-mapping :KommandeHanteringsPlats)
+   :kommande-hanteringsplats nil ;;(t5-location-mapping :KommandeHanteringsPlats)
    :mottagningsdatum         :MottagningsDatum
    :ombud/beskrivning        :Ombud
    :ombud/kontakt            (contact-mapping :OmbudetsKontaktpersonEpost
@@ -156,12 +171,12 @@
    :ombud/namn               :OmbudetsNamn
    :referens                 :Referens
    :senaste-hanteringsplats  (t5-location-mapping :SenasteHanteringsplats)
-   :tidigare-innehavare      :TidigareInnehavare
+   :tidigare-innehavare      nil ;; :TidigareInnehavare
    :tidpunkt                 :Tidpunkt
-   :transport/start-datum    :TransportStartDatum
-   :transport/start-plats    (t5-location-mapping :TransportStartplats)
-   :transport/slut-plats     (t5-location-mapping :TransportSlutplats)
-   :uppkomstplats            (t5-location-mapping :Uppkomstplats)   
+   :transport/start-datum    nil ;;:TransportStartDatum
+   :transport/start-plats    nil ;;(t5-location-mapping :TransportStartplats)
+   :transport/slut-plats     nil ;;(t5-location-mapping :TransportSlutplats)
+   :uppkomstplats            nil ;;(t5-location-mapping :Uppkomstplats)   
    :verksamhet/kontakt       (contact-mapping :VerksamhetensKontaktpersonEpost
                                               :VerksamhetensKontaktpersonNamn
                                               :VerksamhetensKontaktpersonTelefonnummer)
@@ -176,71 +191,94 @@
 (def nvv-mapping
   "Översättning mellan strukturerna i nvv-reports och den gemensamma modellen."
   {
-   :avfall/kod              :Avfall.Kod
-   :avfall/mangd            :Avfall.Mangd
-   :behandlingsplats        (nvv-location-mapping :Behandlingsplats)
-   :cfarnr                  :CfarNr
-   :kommande-hanteringsplats ;; SAKNAS
-   :mottagningsdatum        :TransaktionsDatum
-   :ombud/beskrivning       :Ombud
-   :ombud/kontakt           (contact-mapping :OmbudetsKontaktpersonEpost
-                                             :OmbudetsKontaktpersonNamn
-                                             :OmbudetsKontaktpersonTelefonnummer)
-   :ombud/namn              :OmbudetsNamn
-   :referens                :Referens
-   :senaste-hanteringsplats (nvv-location-mapping :SenasteHanteringsplats)
-   :tidigare-innehavare     ;; SAKNAS
-   :tidpunkt                :Tidpunkt
-   :transport/start-datum   ;; SAKNAS
-   :transport/start-plats   ;; SAKNAS
-   :transport/slut-plats    ;; SAKNAS
-   :uppkomstplats           ;; SAKNAS
-   :verksamhet/kontakt      (contact-mapping :VerksamhetensKontaktpersonEpost
-                                             :VerksamhetensKontaktpersonNamn
-                                             :VerksamhetensKontaktpersonTelefonnummer)
-   :verksamhet/namn         :VerksamhetensNamn
-   :verksamhet/utovare      :Verksamhetsutovare})
+   :avfall/kod               :Avfall.Kod
+   :avfall/mangd             :Avfall.Mangd
+   :avfallId                 :AvfallId
+   :behandlingsplats         (nvv-location-mapping :Behandlingsplats)
+   :cfarnr                   :CfarNr
+   :kommande-hanteringsplats nil
+   :mottagningsdatum         :TransaktionsDatum
+   :ombud/beskrivning        :Ombud
+   :ombud/kontakt            (contact-mapping :OmbudetsKontaktpersonEpost
+                                              :OmbudetsKontaktpersonNamn
+                                              :OmbudetsKontaktpersonTelefonnummer)
+   :ombud/namn               :OmbudetsNamn
+   :referens                 :Referens
+   :senaste-hanteringsplats  (nvv-location-mapping :SenasteHanteringsplats)
+   :tidigare-innehavare      nil
+   :tidpunkt                 :Tidpunkt
+   :transport/start-datum    nil
+   :transport/start-plats    nil
+   :transport/slut-plats     nil
+   :uppkomstplats            nil
+   :verksamhet/kontakt       (contact-mapping :VerksamhetensKontaktpersonEpost
+                                              :VerksamhetensKontaktpersonNamn
+                                              :VerksamhetensKontaktpersonTelefonnummer)
+   :verksamhet/namn          :VerksamhetensNamn
+   :verksamhet/utovare       :Verksamhetsutovare})
+
+
+;; Normaliserar rapporterna till den gemensamma strukturen i två steg:
+;;
+;;  1. normalize transformerar strukturen.
+;;  2. normalize-values konverterar värden som inte representeras likadant i de olika strukturerna.
 
 (def processed-t5-reports
   (->>
    t5-reports
-   (map :payload)
-   (map (partial normalize t5-mapping))
-   (map #(update % :tidpunkt parse-time))))
+   (map #(update % :payload (partial normalize t5-mapping)))
+   (map #(update % :payload normalize-values))))
 
-(def normalized-nvv-reports
-  (map (partial normalize nvv-mapping) t5-reports))
+(def processed-nvv-reports
+  (->>
+   nvv-reports
+   (map (partial normalize nvv-mapping))
+   (map normalize-values)))
 
-;; ----------------------------------------------------------------------------------------------
-;;
-;; TODO
-;;
-;; 1. Finish nvv-mapping once NVV has given us an updated file.
-;;
-;; 2. Convert t5-reports and nvv-reports to common structure by applying the logic in
-;;    t5-mapping and nvv-mapping. This is already implemented in normalize.
-;;
-;; 3. Match identical reports from t5 and nvv and assign AvfallId from nvv-report to t5-report.
-;;
-;; 4. Produce a file (e.g.CSV or JSON) with all the duplicated reports and their AvfallId.
-;;
-;; P.S.
-;; Use Claude to help you write code if necessary. AI is significantly more efficacious
-;; in Clojure than in more verbose and complicated languages like C#.
-;;
-;; P.P.S
-;; Use Claude to help you with installing Babashka and running the program. It is just as simple
-;; as running a NodeJS app.
-;;
-;; ----------------------------------------------------------------------------------------------
+(defn match-key
+  "Exkluderar nycklar för matchning mellan rapporter."
+  [report]
+  (dissoc report :tidpunkt :avfallId))
 
-;; Comment används för smidig REPL-driven utveckling och debugging. Denna kod exekveras
-;; inte vid körning av programmet. Ignorera.
-(comment 
-  (->
-   (first processed-t5-reports)
-   (#(into (sorted-map) %))
+(def nvv-index
+  (group-by match-key processed-nvv-reports))
+
+(defn find-nvv-report-matches
+  "Hittar anteckningar från NVV smo matchar rapporten från T5."
+  [t5-report]
+  (get nvv-index ((comp match-key :payload) t5-report)))
+
+(defn add-avfall-ids
+  "Lägger till avfall-ID på en processed-t5-report."
+  [report]
+  (let [avfallIds (->>
+                   (find-nvv-report-matches report)
+                   (filter identity)
+                   (map #(select-keys % [:avfallId :tidpunkt])))]
+    (assoc report :avfallIds avfallIds)))
+
+(def finished-reports
+  (map add-avfall-ids processed-t5-reports))
+
+(spit "test-output.json"
+      (json/generate-string finished-reports
+                            {:pretty true}))
+
+(comment
+
+  (->>
+   finished-reports
+   (filter (comp seq :avfallIds))
+   first
    pprint)
+  
+  (pprint (first processed-t5-reports))
 
-  (pprint (into (sorted-map) (first nvv-reports)))
-  (pprint (into (sorted-map) (:payload (first t5-reports)))))
+  (->> processed-nvv-reports
+       first
+       pprint)
+
+  (->
+   processed-nvv-reports
+   first
+   pprint))

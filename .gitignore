@@ -7,3 +7,8 @@ nvv-data.csv
 # Emacs backup files
 *#
 *~
+
+# Clojure
+.clj-kondo
+.clj-kondo
+.lsp/.cache/db.transit.json
