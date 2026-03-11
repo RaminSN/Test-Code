@@ -171,12 +171,12 @@
    :ombud/namn               :OmbudetsNamn
    :referens                 :Referens
    :senaste-hanteringsplats  (t5-location-mapping :SenasteHanteringsplats)
-   :tidigare-innehavare      nil ;; :TidigareInnehavare
+   :tidigare-innehavare      nil ;;:TidigareInnehavare
    :tidpunkt                 :Tidpunkt
    :transport/start-datum    nil ;;:TransportStartDatum
-   :transport/start-plats    nil ;;(t5-location-mapping :TransportStartplats)
-   :transport/slut-plats     nil ;;(t5-location-mapping :TransportSlutplats)
-   :uppkomstplats            nil ;;(t5-location-mapping :Uppkomstplats)   
+   :transport/start-plats    (t5-location-mapping :TransportStartplats)
+   :transport/slut-plats     (t5-location-mapping :TransportSlutplats)
+   :uppkomstplats            (t5-location-mapping :Uppkomstplats)   
    :verksamhet/kontakt       (contact-mapping :VerksamhetensKontaktpersonEpost
                                               :VerksamhetensKontaktpersonNamn
                                               :VerksamhetensKontaktpersonTelefonnummer)
@@ -196,7 +196,7 @@
    :avfallId                 :AvfallId
    :behandlingsplats         (nvv-location-mapping :Behandlingsplats)
    :cfarnr                   :CfarNr
-   :kommande-hanteringsplats nil
+   :kommande-hanteringsplats nil ;;(nvv-location-mapping :Kommandehanteringsplats)
    :mottagningsdatum         :TransaktionsDatum
    :ombud/beskrivning        :Ombud
    :ombud/kontakt            (contact-mapping :OmbudetsKontaktpersonEpost
@@ -205,12 +205,12 @@
    :ombud/namn               :OmbudetsNamn
    :referens                 :Referens
    :senaste-hanteringsplats  (nvv-location-mapping :SenasteHanteringsplats)
-   :tidigare-innehavare      nil
+   :tidigare-innehavare      nil ;;:TidgareInnehavare
    :tidpunkt                 :Tidpunkt
    :transport/start-datum    nil
-   :transport/start-plats    nil
-   :transport/slut-plats     nil
-   :uppkomstplats            nil
+   :transport/start-plats    (nvv-location-mapping :Transportstartplats)
+   :transport/slut-plats     (nvv-location-mapping :Transportslutplats)
+   :uppkomstplats            (nvv-location-mapping :Uppkomstplats)
    :verksamhet/kontakt       (contact-mapping :VerksamhetensKontaktpersonEpost
                                               :VerksamhetensKontaktpersonNamn
                                               :VerksamhetensKontaktpersonTelefonnummer)
@@ -269,14 +269,18 @@
   (->>
    finished-reports
    (filter (comp seq :avfallIds))
-   first
-   pprint)
+   first)
   
   (pprint (first processed-t5-reports))
 
   (->> processed-nvv-reports
        first
        pprint)
+
+(->>
+ nvv-reports
+ (filter :Transportslutplats)
+ first)
 
   (->
    processed-nvv-reports
